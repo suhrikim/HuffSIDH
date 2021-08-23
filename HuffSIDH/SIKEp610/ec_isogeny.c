@@ -1,0 +1,1237 @@
+/********************************************************************************************
+* Supersingular Isogeny Key Encapsulation Library
+*
+* Abstract: elliptic curve and isogeny functions
+*********************************************************************************************/
+
+
+void xDBL(const point_proj_t P, point_proj_t Q, const f2elm_t A24plus, const f2elm_t C24)
+{ // Doubling of a Montgomery point in projective coordinates (X:Z).
+  // Input: projective Montgomery x-coordinates P = (X1:Z1), where x1=X1/Z1 and Montgomery curve constants A+2C and 4C.
+  // Output: projective Montgomery x-coordinates Q = 2*P = (X2:Z2).
+    f2elm_t t0, t1;
+    
+    mp2_sub_p2(P->X, P->Z, t0);                     // t0 = X1-Z1
+    mp2_add(P->X, P->Z, t1);                        // t1 = X1+Z1
+    fp2sqr_mont(t0, t0);                            // t0 = (X1-Z1)^2 
+    fp2sqr_mont(t1, t1);                            // t1 = (X1+Z1)^2 
+    fp2mul_mont(C24, t0, Q->Z);                     // Z2 = C24*(X1-Z1)^2   
+    fp2mul_mont(t1, Q->Z, Q->X);                    // X2 = C24*(X1-Z1)^2*(X1+Z1)^2
+    mp2_sub_p2(t1, t0, t1);                         // t1 = (X1+Z1)^2-(X1-Z1)^2 
+    fp2mul_mont(A24plus, t1, t0);                   // t0 = A24plus*[(X1+Z1)^2-(X1-Z1)^2]
+    mp2_add(Q->Z, t0, Q->Z);                        // Z2 = A24plus*[(X1+Z1)^2-(X1-Z1)^2] + C24*(X1-Z1)^2
+    fp2mul_mont(Q->Z, t1, Q->Z);                    // Z2 = [A24plus*[(X1+Z1)^2-(X1-Z1)^2] + C24*(X1-Z1)^2]*[(X1+Z1)^2-(X1-Z1)^2]
+}
+
+// CmDsq = (C-D)^2
+// CD4 = 4CD
+// check
+void xDBL_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t CmDsq, const f2elm_t CD4)
+{ // Doubling of a Huff point in projective coordinates (X:Z).
+  // Input: projective Huff w-coordinates P = (X1:Z1), where w1=X1/Z1 and Huff curve constants (C-D)^2 and 4CD.
+  // Output: projective Huff w-coordinates Q = 2*P = (X2:Z2).
+    f2elm_t t0, t1, t2;
+
+
+    mp2_add(P->X, P->Z, t0);                         // t0 = X1+Z1
+    fp2sqr_mont(t0, t0);                                // t0 = (X1+Z1)^2
+    mp2_sub_p2(P->X, P->Z, t1);                         // t1 = X1-Z1
+    fp2sqr_mont(t1, t1);                                // t1 = (X1-Z1)^2
+    fp2mul_mont(CD4, t0, t2);                           // t2 = 4CD(X1+Z1)^2
+    fp2mul_mont(t2, t1, Q->Z);                          // Z2 = 4CD(X1+Z1)^2(X1-Z1)^2
+
+    mp2_sub_p2(t0, t1, t0);                             // t0 = 4X1Z1
+    fp2mul_mont(t0, CmDsq, Q->X);                        // X2 = 4X1Z1(C-D)^2
+    mp2_add(Q->X, t2, Q->X);
+    fp2mul_mont(Q->X, t0, Q->X);
+
+}
+
+
+void xADD(point_proj_t S, const point_proj_t P, const point_proj_t Q, const point_proj_t PQ)
+{
+    f2elm_t a, b, c, d;
+
+    fp2add(P->X, P->Z, a);
+    fp2sub(P->X, P->Z, b);
+    fp2add(Q->X, Q->Z, c);
+    fp2sub(Q->X, Q->Z, d);
+    fp2mul_mont(a, d, a);
+    fp2mul_mont(b, c, b);
+    fp2add(a, b, c);
+    fp2sub(a, b, d);
+    fp2sqr_mont(c, c);
+    fp2sqr_mont(d, d);
+    fp2mul_mont(PQ->Z, c, S->X);
+    fp2mul_mont(PQ->X, d, S->Z);
+
+}
+
+
+void xADD_Huff(point_proj_t S, const point_proj_t P, const point_proj_t Q, const point_proj_t PQ)
+{
+    f2elm_t a, b, c, d;
+
+    fp2add(P->X, P->Z, a);      // a = Px+Pz
+    fp2sub(P->X, P->Z, b);      // b = Px-Pz
+    fp2add(Q->X, Q->Z, c);      // c = Qx+Qz
+    fp2sub(Q->X, Q->Z, d);      // d = Qx-Qz
+    fp2mul_mont(a, d, a);       // a = (Px+Pz)(Qx-Qz)=PxQx-PxQz+PzQx-PzQz
+    fp2mul_mont(b, c, b);       // b = (Px-Pz)(Qx+Qz)=PxQx+PxQz-PzQx-PzQz
+    fp2add(a, b, c);            // c = 2(PxQx-PzQz)
+    fp2sub(a, b, d);            // d = 2(-PxQz+PzQx)
+    fp2sqr_mont(c, c);          // c = 4(PxQx-PzQz)^2
+    fp2sqr_mont(d, d);          // d = 4(-PxQz+PzQx)^2
+    fp2mul_mont(PQ->Z, d, S->X);  // Sx=z 4(-PxQz+PzQx)^2
+    fp2mul_mont(PQ->X, c, S->Z);  // Sz=x 4(PxQx-PzQz)^2
+
+}
+
+
+
+
+
+
+void xDBLe(const point_proj_t P, point_proj_t Q, const f2elm_t A24plus, const f2elm_t C24, const int e)
+{ // Computes [2^e](X:Z) on Montgomery curve with projective constant via e repeated doublings.
+  // Input: projective Montgomery x-coordinates P = (XP:ZP), such that xP=XP/ZP and Montgomery curve constants A+2C and 4C.
+  // Output: projective Montgomery x-coordinates Q <- (2^e)*P.
+    int i;
+    
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        xDBL(Q, Q, A24plus, C24);
+    }
+}
+
+// CmDsq = (C-D)^2
+// CD4 = 4CD
+void xDBLe_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t CmDsq, const f2elm_t CD4, const int e)
+{ // Computes [2^e](X:Z) on Huff curve with projective constant via e repeated doublings.
+  // Input: projective Huff w-coordinates P = (XP:ZP), such that wP=XP/ZP and Huff curve constants (C-D)^2 and 4CD.
+  // Output: projective Huff w-coordinates Q <- (2^e)*P.
+    int i;
+    
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        xDBL_Huff(Q, Q, CmDsq, CD4);
+    }
+}
+
+
+
+void get_4_isog(const point_proj_t P, f2elm_t A24plus, f2elm_t C24, f2elm_t* coeff)
+{ // Computes the corresponding 4-isogeny of a projective Montgomery point (X4:Z4) of order 4.
+  // Input:  projective point of order four P = (X4:Z4).
+  // Output: the 4-isogenous Montgomery curve with projective coefficients A+2C/4C and the 3 coefficients 
+  //         that are used to evaluate the isogeny at a point in eval_4_isog().
+    
+    mp2_sub_p2(P->X, P->Z, coeff[1]);               // coeff[1] = X4-Z4
+    mp2_add(P->X, P->Z, coeff[2]);                  // coeff[2] = X4+Z4
+    fp2sqr_mont(P->Z, coeff[0]);                    // coeff[0] = Z4^2
+    mp2_add(coeff[0], coeff[0], coeff[0]);          // coeff[0] = 2*Z4^2
+    fp2sqr_mont(coeff[0], C24);                     // C24 = 4*Z4^4
+    mp2_add(coeff[0], coeff[0], coeff[0]);          // coeff[0] = 4*Z4^2
+    fp2sqr_mont(P->X, A24plus);                     // A24plus = X4^2
+    mp2_add(A24plus, A24plus, A24plus);             // A24plus = 2*X4^2
+    fp2sqr_mont(A24plus, A24plus);                  // A24plus = 4*X4^4
+}
+
+
+void get_4_isog_Huff(const point_proj_t P, f2elm_t CmDsq, f2elm_t CD4, f2elm_t* coeff)
+{ // Computes the corresponding 4-isogeny of a projective Huff point (X4:Z4) of order 4.
+  // Input:  projective point of order four P = (X4:Z4).
+  // Output: the 4-isogenous Huff curve with projective coefficients (C-D)^2)/4CD and the 3 coefficients 
+  //         that are used to evaluate the isogeny at a point in eval_4_isog().
+    
+    mp2_sub_p2(P->X, P->Z, coeff[1]);               // coeff[1] = X4-Z4
+    mp2_add(P->X, P->Z, coeff[2]);                  // coeff[2] = X4+Z4
+    fp2sqr_mont(P->Z, coeff[0]);                    // coeff[0] = Z4^2
+    mp2_add(coeff[0], coeff[0], coeff[0]);          // coeff[0] = 2*Z4^2
+    fp2sqr_mont(coeff[0], CmDsq);                   // CmDsq = 4*Z4^4
+    mp2_add(coeff[0], coeff[0], coeff[0]);          // coeff[0] = 4*Z4^2
+    fp2sqr_mont(P->X, CD4);                         // CD4 = X4^2
+    mp2_add(CD4, CD4, CD4);                         // CD4 = 2*X4^2
+    fp2sqr_mont(CD4, CD4);                          // CD4 = 4*X4^4
+    mp2_sub_p2(CmDsq, CD4, CmDsq);                  // CmDsq = 4*Z4^4-4*X4^4
+}
+
+
+void eval_4_isog(point_proj_t P, f2elm_t* coeff)
+{ // Evaluates the isogeny at the point (X:Z) in the domain of the isogeny, given a 4-isogeny phi defined 
+  // by the 3 coefficients in coeff (computed in the function get_4_isog()).
+  // Inputs: the coefficients defining the isogeny, and the projective point P = (X:Z).
+  // Output: the projective point P = phi(P) = (X:Z) in the codomain. 
+    f2elm_t t0, t1;
+    
+    mp2_add(P->X, P->Z, t0);                        // t0 = X+Z
+    mp2_sub_p2(P->X, P->Z, t1);                     // t1 = X-Z
+    fp2mul_mont(t0, coeff[1], P->X);                // X = (X+Z)*coeff[1]
+    fp2mul_mont(t1, coeff[2], P->Z);                // Z = (X-Z)*coeff[2]
+    fp2mul_mont(t0, t1, t0);                        // t0 = (X+Z)*(X-Z)
+    fp2mul_mont(coeff[0], t0, t0);                  // t0 = coeff[0]*(X+Z)*(X-Z)
+    mp2_add(P->X, P->Z, t1);                        // t1 = (X-Z)*coeff[2] + (X+Z)*coeff[1]
+    mp2_sub_p2(P->X, P->Z, P->Z);                   // Z = (X-Z)*coeff[2] - (X+Z)*coeff[1]
+    fp2sqr_mont(t1, t1);                            // t1 = [(X-Z)*coeff[2] + (X+Z)*coeff[1]]^2
+    fp2sqr_mont(P->Z, P->Z);                        // Z = [(X-Z)*coeff[2] - (X+Z)*coeff[1]]^2
+    mp2_add(t1, t0, P->X);                          // X = coeff[0]*(X+Z)*(X-Z) + [(X-Z)*coeff[2] + (X+Z)*coeff[1]]^2
+    mp2_sub_p2(P->Z, t0, t0);                       // t0 = [(X-Z)*coeff[2] - (X+Z)*coeff[1]]^2 - coeff[0]*(X+Z)*(X-Z)
+    fp2mul_mont(P->X, t1, P->X);                    // Xfinal
+    fp2mul_mont(P->Z, t0, P->Z);                    // Zfinal
+}
+
+
+
+
+void eval_4_isog_Huff(point_proj_t P, f2elm_t* coeff)
+{ // Evaluates the isogeny at the point (X:Z) in the domain of the isogeny, given a 4-isogeny phi defined 
+  // by the 3 coefficients in coeff (computed in the function get_4_isog_Huff()).
+  // Inputs: the coefficients defining the isogeny, and the projective point P = (X:Z).
+  // Output: the projective point P = phi(P) = (X:Z) in the codomain. 
+    f2elm_t t0, t1;
+    
+    mp2_add(P->X, P->Z, t0);                        // t0 = X+Z
+    mp2_sub_p2(P->X, P->Z, t1);                     // t1 = X-Z
+    fp2mul_mont(t0, coeff[1], P->Z);                // Z = (X+Z)*coeff[1] = (X+Z)(X4-Z4)
+    fp2mul_mont(t1, coeff[2], P->X);                // X = (X-Z)*coeff[2] = (X-Z)(X4+Z4)
+    fp2mul_mont(t0, t1, t0);                        // t0 = (X+Z)*(X-Z)
+    fp2mul_mont(coeff[0], t0, t0);                  // t0 = coeff[0]*(X+Z)*(X-Z) = 4*Z4^2(X^2-Z^2)
+    mp2_add(P->Z, P->X, t1);                        // t1 = (X+Z)(X4-Z4) + (X-Z)(X4+Z4) = 2(XX4-ZZ4)
+
+    mp2_sub_p2(P->Z, P->X, P->X);                   // X = (X+Z)(X4-Z4) - (X-Z)(X4+Z4) =2(-XZ4+ZX4)
+
+    fp2sqr_mont(t1, t1);                            // t1 = [(X-Z)*coeff[2] + (X+Z)*coeff[1]]^2 = 4(XX4-ZZ4)^2 (for z)
+    fp2sqr_mont(P->X, P->X);                        // X = [(X-Z)*coeff[2] - (X+Z)*coeff[1]]^2 =4(XZ4-ZX4)^2
+    
+    mp2_add(t1, t0, P->Z);                          // Z = coeff[0]*(X+Z)*(X-Z) + [(X-Z)*coeff[2] + (X+Z)*coeff[1]]^2 //zx 4*(x*x4^2 - 2*x4*z*z4 + x*z4^2)*x
+    mp2_sub_p2(P->X, t0, t0);                       // t0 = [(X-Z)*coeff[2] - (X+Z)*coeff[1]]^2 - coeff[0]*(X+Z)*(X-Z) //4*(x4^2*z - 2*x*x4*z4 + z*z4^2)*z
+
+    fp2mul_mont(P->Z, P->X, P->X);                  
+    fp2mul_mont(t1, t0, P->Z);                    
+    
+}
+
+//
+void xTPL(const point_proj_t P, point_proj_t Q, const f2elm_t A24minus, const f2elm_t A24plus)              
+{ // Tripling of a Montgomery point in projective coordinates (X:Z).
+  // Input: projective Montgomery x-coordinates P = (X:Z), where x=X/Z and Montgomery curve constants A24plus = A+2C and A24minus = A-2C.
+  // Output: projective Montgomery x-coordinates Q = 3*P = (X3:Z3).
+    f2elm_t t0, t1, t2, t3, t4, t5, t6;
+                                    
+    mp2_sub_p2(P->X, P->Z, t0);                     // t0 = X-Z 
+    fp2sqr_mont(t0, t2);                            // t2 = (X-Z)^2           
+    mp2_add(P->X, P->Z, t1);                        // t1 = X+Z 
+    fp2sqr_mont(t1, t3);                            // t3 = (X+Z)^2
+    mp2_add(P->X, P->X, t4);                        // t4 = 2*X
+    mp2_add(P->Z, P->Z, t0);                        // t0 = 2*Z 
+    fp2sqr_mont(t4, t1);                            // t1 = 4*X^2
+    mp2_sub_p2(t1, t3, t1);                         // t1 = 4*X^2 - (X+Z)^2 
+    mp2_sub_p2(t1, t2, t1);                         // t1 = 4*X^2 - (X+Z)^2 - (X-Z)^2
+    fp2mul_mont(A24plus, t3, t5);                   // t5 = A24plus*(X+Z)^2 
+    fp2mul_mont(t3, t5, t3);                        // t3 = A24plus*(X+Z)^4
+    fp2mul_mont(A24minus, t2, t6);                  // t6 = A24minus*(X-Z)^2
+    fp2mul_mont(t2, t6, t2);                        // t2 = A24minus*(X-Z)^4
+    mp2_sub_p2(t2, t3, t3);                         // t3 = A24minus*(X-Z)^4 - A24plus*(X+Z)^4
+    mp2_sub_p2(t5, t6, t2);                         // t2 = A24plus*(X+Z)^2 - A24minus*(X-Z)^2
+    fp2mul_mont(t1, t2, t1);                        // t1 = [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2]
+    fp2add(t3, t1, t2);                             // t2 = [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2] + A24minus*(X-Z)^4 - A24plus*(X+Z)^4
+    fp2sqr_mont(t2, t2);                            // t2 = t2^2
+    fp2mul_mont(t4, t2, Q->X);                      // X3 = 2*X*t2
+    fp2sub(t3, t1, t1);                             // t1 = A24minus*(X-Z)^4 - A24plus*(X+Z)^4 - [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2]
+    fp2sqr_mont(t1, t1);                            // t1 = t1^2
+    fp2mul_mont(t0, t1, Q->Z);                      // Z3 = 2*Z*t1
+}
+
+// A24minus = (C-D)^2
+//  A24plus = (C+D)^2
+void xTPL_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t A24minus, const f2elm_t A24plus)              
+{ // Tripling of a Huff point in projective coordinates (X:Z).
+  // Input: projective Huff w-coordinates P = (X:Z), where w=X/Z and Huff curve constants A24plus = (C+D)^2 and A24minus = (C-D)^2.
+  // Output: projective Huff w-coordinates Q = 3*P = (X3:Z3).
+    f2elm_t t0, t1, t2, t3, t4, t5, t6;
+                                    
+    mp2_sub_p2(P->X, P->Z, t0);                     // t0 = X-Z 
+    fp2sqr_mont(t0, t2);                            // t2 = (X-Z)^2           
+    mp2_add(P->X, P->Z, t1);                        // t1 = X+Z 
+    fp2sqr_mont(t1, t3);                            // t3 = (X+Z)^2
+    mp2_add(P->X, P->X, t4);                        // t4 = 2*X
+    mp2_add(P->Z, P->Z, t0);                        // t0 = 2*Z 
+    fp2sqr_mont(t4, t1);                            // t1 = 4*X^2
+    mp2_sub_p2(t1, t3, t1);                         // t1 = 4*X^2 - (X+Z)^2 
+    mp2_sub_p2(t1, t2, t1);                         // t1 = 4*X^2 - (X+Z)^2 - (X-Z)^2
+    fp2mul_mont(A24plus, t3, t5);                   // t5 = A24plus*(X+Z)^2 
+    fp2mul_mont(t3, t5, t3);                        // t3 = A24plus*(X+Z)^4
+    fp2mul_mont(A24minus, t2, t6);                  // t6 = A24minus*(X-Z)^2
+    fp2mul_mont(t2, t6, t2);                        // t2 = A24minus*(X-Z)^4
+    mp2_sub_p2(t2, t3, t3);                         // t3 = A24minus*(X-Z)^4 - A24plus*(X+Z)^4
+    mp2_sub_p2(t5, t6, t2);                         // t2 = A24plus*(X+Z)^2 - A24minus*(X-Z)^2
+    fp2mul_mont(t1, t2, t1);                        // t1 = [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2]
+    fp2add(t3, t1, t2);                             // t2 = [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2] + A24minus*(X-Z)^4 - A24plus*(X+Z)^4
+    fp2sqr_mont(t2, t2);                            // t2 = t2^2
+    fp2mul_mont(t4, t2, Q->X);                      // X3 = 2*X*t2
+    fp2sub(t3, t1, t1);                             // t1 = A24minus*(X-Z)^4 - A24plus*(X+Z)^4 - [4*X^2 - (X+Z)^2 - (X-Z)^2]*[A24plus*(X+Z)^2 - A24minus*(X-Z)^2]
+    fp2sqr_mont(t1, t1);                            // t1 = t1^2
+    fp2mul_mont(t0, t1, Q->Z);                      // Z3 = 2*Z*t1
+}
+
+
+
+void xTPLe(const point_proj_t P, point_proj_t Q, const f2elm_t A24minus, const f2elm_t A24plus, const int e)
+{ // Computes [3^e](X:Z) on Montgomery curve with projective constant via e repeated triplings.
+  // Input: projective Montgomery x-coordinates P = (XP:ZP), such that xP=XP/ZP and Montgomery curve constants A24plus = A+2C and A24minus = A-2C.
+  // Output: projective Montgomery x-coordinates Q <- (3^e)*P.
+    int i;
+        
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        xTPL(Q, Q, A24minus, A24plus);
+    }
+}
+
+// A24minus = (C-D)^2
+//  A24plus = (C+D)^2
+void xTPLe_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t A24minus, const f2elm_t A24plus, const int e)
+{ // Computes [3^e](X:Z) on Huff curve with projective constant via e repeated triplings.
+  // Input: projective Huff w-coordinates P = (XP:ZP), such that wP=XP/ZP and Huff curve constants A24plus = (C+D)^2 and A24minus = (C-D)^2.
+  // Output: projective Huff x-coordinates Q <- (3^e)*P.
+    int i;
+        
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        xTPL_Huff(Q, Q, A24minus, A24plus);
+    }
+}
+
+
+
+void get_3_isog(const point_proj_t P, f2elm_t A24minus, f2elm_t A24plus, f2elm_t* coeff)
+{ // Computes the corresponding 3-isogeny of a projective Montgomery point (X3:Z3) of order 3.
+  // Input:  projective point of order three P = (X3:Z3).
+  // Output: the 3-isogenous Montgomery curve with projective coefficient A/C. 
+    f2elm_t t0, t1, t2, t3, t4;
+    
+    mp2_sub_p2(P->X, P->Z, coeff[0]);               // coeff0 = X-Z
+    fp2sqr_mont(coeff[0], t0);                      // t0 = (X-Z)^2
+    mp2_add(P->X, P->Z, coeff[1]);                  // coeff1 = X+Z
+    fp2sqr_mont(coeff[1], t1);                      // t1 = (X+Z)^2
+    mp2_add(P->X, P->X, t3);                        // t3 = 2*X
+    fp2sqr_mont(t3, t3);                            // t3 = 4*X^2 
+    fp2sub(t3, t0, t2);                             // t2 = 4*X^2 - (X-Z)^2 
+    fp2sub(t3, t1, t3);                             // t3 = 4*X^2 - (X+Z)^2
+    mp2_add(t0, t3, t4);                            // t4 = 4*X^2 - (X+Z)^2 + (X-Z)^2 
+    mp2_add(t4, t4, t4);                            // t4 = 2(4*X^2 - (X+Z)^2 + (X-Z)^2) 
+    mp2_add(t1, t4, t4);                            // t4 = 8*X^2 - (X+Z)^2 + 2*(X-Z)^2
+    fp2mul_mont(t2, t4, A24minus);                  // A24minus = [4*X^2 - (X-Z)^2]*[8*X^2 - (X+Z)^2 + 2*(X-Z)^2] //(C=D)
+    mp2_add(t1, t2, t4);                            // t4 = 4*X^2 + (X+Z)^2 - (X-Z)^2
+    mp2_add(t4, t4, t4);                            // t4 = 2(4*X^2 + (X+Z)^2 - (X-Z)^2) 
+    mp2_add(t0, t4, t4);                            // t4 = 8*X^2 + 2*(X+Z)^2 - (X-Z)^2
+    fp2mul_mont(t3, t4, A24plus);                   // A24plus = [4*X^2 - (X+Z)^2]*[8*X^2 + 2*(X+Z)^2 - (X-Z)^2] //(C+D)^2
+}  
+
+// A24minus = (C-D)^2
+//  A24plus = (C+D)^2
+void get_3_isog_Huff(const point_proj_t P, f2elm_t A24minus, f2elm_t A24plus, f2elm_t* coeff)
+{ // Computes the corresponding 3-isogeny of a projective Huff point (X3:Z3) of order 3.
+  // Input:  projective point of order three P = (X3:Z3).
+  // Output: the 3-isogenous Huff curve with projective coefficient C/D. 
+    f2elm_t t0, t1, t2, t3, t4;
+    
+    mp2_sub_p2(P->X, P->Z, coeff[0]);               // coeff0 = X-Z
+    fp2sqr_mont(coeff[0], t0);                      // t0 = (X-Z)^2
+    mp2_add(P->X, P->Z, coeff[1]);                  // coeff1 = X+Z
+    fp2sqr_mont(coeff[1], t1);                      // t1 = (X+Z)^2
+    mp2_add(P->Z, P->Z, t3);                        // t3 = 2*Z
+    fp2sqr_mont(t3, t3);                            // t3 = 4*Z^2 
+    fp2sub(t3, t0, t2);                             // t2 = 4*Z^2 - (X-Z)^2 
+    fp2sub(t3, t1, t3);                             // t3 = 4*Z^2 - (X+Z)^2
+    mp2_add(t0, t3, t4);                            // t4 = 4*Z^2 - (X+Z)^2 + (X-Z)^2 
+    mp2_add(t4, t4, t4);                            // t4 = 2(4*Z^2 - (X+Z)^2 + (X-Z)^2) 
+    mp2_add(t1, t4, t4);                            // t4 = 8*Z^2 - (X+Z)^2 + 2*(X-Z)^2
+    fp2mul_mont(t2, t4, A24minus);                  // A24minus = [4*Z^2 - (X-Z)^2]*[8*Z^2 - (X+Z)^2 + 2*(X-Z)^2] //(C=D)
+    mp2_add(t1, t2, t4);                            // t4 = 4*Z^2 + (X+Z)^2 - (X-Z)^2
+    mp2_add(t4, t4, t4);                            // t4 = 2(4*Z^2 + (X+Z)^2 - (X-Z)^2) 
+    mp2_add(t0, t4, t4);                            // t4 = 8*Z^2 + 2*(X+Z)^2 - (X-Z)^2
+    fp2mul_mont(t3, t4, A24plus);                   // A24plus = [4*Z^2 - (X+Z)^2]*[8*Z^2 + 2*(X+Z)^2 - (X-Z)^2] //(C+D)^2
+}  
+
+void eval_3_isog(point_proj_t Q, const f2elm_t* coeff)
+{ // Computes the 3-isogeny R=phi(X:Z), given projective point (X3:Z3) of order 3 on a Montgomery curve and 
+  // a point P with 2 coefficients in coeff (computed in the function get_3_isog()).
+  // Inputs: projective points P = (X3:Z3) and Q = (X:Z).
+  // Output: the projective point Q <- phi(Q) = (X3:Z3). 
+    f2elm_t t0, t1, t2;
+
+    mp2_add(Q->X, Q->Z, t0);                      // t0 = X+Z
+    mp2_sub_p2(Q->X, Q->Z, t1);                   // t1 = X-Z
+    fp2mul_mont(coeff[0], t0, t0);                // t0 = coeff0*(X+Z)
+    fp2mul_mont(coeff[1], t1, t1);                // t1 = coeff1*(X-Z)
+    mp2_add(t0, t1, t2);                          // t2 = coeff0*(X+Z) + coeff1*(X-Z)
+    mp2_sub_p2(t1, t0, t0);                       // t0 = coeff1*(X-Z) - coeff0*(X+Z)
+    fp2sqr_mont(t2, t2);                          // t2 = [coeff0*(X+Z) + coeff1*(X-Z)]^2
+    fp2sqr_mont(t0, t0);                          // t0 = [coeff1*(X-Z) - coeff0*(X+Z)]^2
+    fp2mul_mont(Q->X, t2, Q->X);                  // X3final = X*[coeff0*(X+Z) + coeff1*(X-Z)]^2        
+    fp2mul_mont(Q->Z, t0, Q->Z);                  // Z3final = Z*[coeff1*(X-Z) - coeff0*(X+Z)]^2
+}
+
+
+void eval_3_isog_Huff(point_proj_t Q, const f2elm_t* coeff)
+{ // Computes the 3-isogeny R=phi(X:Z), given projective point (X3:Z3) of order 3 on a Huff curve and 
+  // a point P with 2 coefficients in coeff (computed in the function get_3_isog()).
+  // Inputs: projective points P = (X3:Z3) and Q = (X:Z).
+  // Output: the projective point Q <- phi(Q) = (X3:Z3). 
+    f2elm_t t0, t1, t2;
+
+    mp2_add(Q->X, Q->Z, t0);                      // t0 = X+Z
+    mp2_sub_p2(Q->X, Q->Z, t1);                   // t1 = X-Z
+    fp2mul_mont(coeff[0], t0, t0);                // t0 = coeff0*(X+Z)
+    fp2mul_mont(coeff[1], t1, t1);                // t1 = coeff1*(X-Z)
+    mp2_sub_p2(t1, t0, t2);                       // t2 = coeff1*(X-Z) - coeff0*(X+Z) // for W'
+    mp2_add(t0, t1, t0);                          // t0 = coeff0*(X+Z) + coeff1*(X-Z) // for Z'
+
+    fp2sqr_mont(t2, t2);                          // t2 = [coeff0*(X+Z) + coeff1*(X-Z)]^2 // for W'
+    fp2sqr_mont(t0, t0);                          // t0 = [coeff1*(X-Z) - coeff0*(X+Z)]^2 // for Z'
+    fp2mul_mont(Q->X, t2, Q->X);                  // X3final = X*[coeff0*(X+Z) + coeff1*(X-Z)]^2       
+    fp2mul_mont(Q->Z, t0, Q->Z);                  // Z3final = Z*[coeff1*(X-Z) - coeff0*(X+Z)]^2
+}
+
+
+
+
+
+void x5P(const point_proj_t P, point_proj_t Q, const f2elm_t A24plus, const f2elm_t C24)              
+{ // Quintupling of a Montgomery point in projective coordinates (X:Z).
+  // Input: projective Montgomery x-coordinates P = (X:Z), where x=X/Z and Montgomery curve constants A24plus = A+2C and A24minus = A-2C.
+  // Output: projective Montgomery x-coordinates Q = 5*P = (X5:Z5).
+    point_proj_t S, T;
+    copy_words((digit_t*)P, (digit_t*)S, 2*2*NWORDS_FIELD);
+
+    xDBL(S, T, A24plus, C24); //T=2P, S=P
+    xADD(S, T, P, P);          // S=3P
+    xADD(T, S, T, P); 
+    copy_words((digit_t*)T, (digit_t*)Q, 2*2*NWORDS_FIELD);
+}
+
+
+// CmDsq = (C-D)^2
+// CD4 = 4CD
+void x5P_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t CmDsq, const f2elm_t CD4)              
+{ // Quintupling of a Huff point in projective coordinates (X:Z).
+  // Input: projective Huff x-coordinates P = (X:Z), where x=X/Z and Huff curve constants CmDsq=(C-D)^2 and CD4=4CD.
+  // Output: projective Huff x-coordinates Q = 5*P = (X5:Z5).
+    point_proj_t S, T;
+    copy_words((digit_t*)P, (digit_t*)S, 2*2*NWORDS_FIELD);
+
+    xDBL_Huff(S, T, CmDsq, CD4); //Q=2P
+    xADD_Huff(S, T, P, P);          // S=3P
+    xADD_Huff(T, S, T, P); 
+    copy_words((digit_t*)T, (digit_t*)Q, 2*2*NWORDS_FIELD);
+}
+
+
+
+
+void x5Pe(const point_proj_t P, point_proj_t Q, const f2elm_t A24plus, const f2elm_t C24, const int e)
+{ // Computes [5^e](X:Z) on Montgomery curve with projective constant via e repeated quintuplings.
+  // Input: projective Montgomery x-coordinates P = (XP:ZP), such that xP=XP/ZP and Montgomery curve constants A24plus = A+2C and A24minus = A-2C.
+  // Output: projective Montgomery x-coordinates Q <- (5^e)*P.
+    int i;
+        
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        x5P(Q, Q, A24plus, C24);
+    }
+}
+
+void x5Pe_Huff(const point_proj_t P, point_proj_t Q, const f2elm_t CmDsq, const f2elm_t CD4, const int e)
+{ // Computes [5^e](X:Z) on Huff curve with projective constant via e repeated quintuplings.
+  // Input: projective Huff x-coordinates P = (XP:ZP), such that xP=XP/ZP and Huff curve constants CmDsq=(C-D)^2 and CD4=4CD.
+  // Output: projective Huff x-coordinates Q <- (5^e)*P.
+    int i;
+
+    copy_words((digit_t*)P, (digit_t*)Q, 2*2*NWORDS_FIELD);
+
+    for (i = 0; i < e; i++) {
+        x5P_Huff(Q, Q, CmDsq, CD4);
+    }
+}
+
+// recover coefficient using 2-torsion method by Costello and Hisil
+void get_5_isog(const point_proj_t P, f2elm_t A24plus, f2elm_t C24)
+{ // Computes the corresponding 5-isogeny of a projective Montgomery point (X5:Z5) of order 5.
+  // Input:  projective point 2-torsion point P = (phi(X2):phi(Z2)).
+  // Output: the 5-isogenous Montgomery curve with projective coefficient A/C. 
+    f2elm_t t0, t1, t2, t3, t4, t5;
+
+    fp2add(P->X, P->Z, t0);                        // t0 = X+Z
+    fp2sub(P->X, P->Z, t1);                        // t1 = X-Z
+    fp2sqr_mont(t1, A24plus);                      // A24plus = (X-Z)^2
+    fp2sqr_mont(t0, t0);                           // t0 = (X+Z)^2
+    fp2sub(A24plus, t0, C24);                      // C24 = (X-Z)^2-(X+Z)^2 =2(X^2+Z^2)
+
+}
+
+
+void get_5_isog_huff(const point_proj_t P, const point_proj_t P2, f2elm_t C, f2elm_t D, f2elm_t CmDsq, f2elm_t CD4, f2elm_t* coeff)
+{ // Computes the corresponding 5-isogeny of a projective Huff point (X5:Z5) of order 5.
+  // Input:  projective point of order five P = (X5:Z5) and doubling of P (P2).
+  // Output: the 5-isogenous Huff curve with projective coefficient C,D and CmDsq=(C-D)^2, CD4=4CD. 
+    f2elm_t t0, t1, t2, t3, t4, t5;
+
+    fp2add(P->X, P->Z, coeff[0]);                 // coeff[0] = Xi+Zi
+    fp2sub(P->X, P->Z, coeff[1]);                 // coeff[1] = Xi-Zi   
+    fp2add(P2->X, P2->Z, coeff[2]);                 // coeff[2] = X2i+Z2i
+    fp2sub(P2->X, P2->Z, coeff[3]);                 // coeff[3] = X2i-Z2i     
+    fp2add(C, D, t0);                             // t0 = C+D
+    fp2sub(C, D, t1);                             // t1 = C-D
+
+    fp2mul_mont(t0, coeff[0], t4);                // t4 = (C+D)(Xi+Zi) = CXi+CZi+DXi+DZi
+    fp2mul_mont(t1, coeff[1], t5);                // t5 = (C-D)(Xi-Zi) = CXi-CZi-DXi+DZi
+    fp2mul_mont(t0, coeff[2], t0);                // t0 = (C+D)(X2i+Z2i) = CX2i+CZ2i+DX2i+DZ2i 
+    fp2mul_mont(t1, coeff[3], t1);                // t1 = (C-D)(X2i-Z2i) = CX2i-CZ2i-DX2i+DZ2i
+    fp2add(t0, t1, t2);                           // t2 = 2(CX2+DZ2) // D'(z')
+    fp2sub(t0, t1, t3);                           // t3 = 2(CZ2+DX2) //C'(x')
+    fp2add(t4, t5, t0);                           // t0 = 2(CX+DZ)  //D'(z')
+    fp2sub(t4, t5, t1);                           // t1 = z(CZ+DX) //C'(x')
+    fp2mul_mont(t2, t0, t2); //z'
+    fp2mul_mont(t3, t1, t3); //x'
+    fp2sqr_mont(t2, t2);
+    fp2sqr_mont(t3, t3);
+    fp2mul_mont(t3, C, C); // new C
+    fp2mul_mont(t2, D, D); //new D
+
+    // coefficient transform
+
+    fp2add(C, D, t0); // t0 = (C+D)
+    fp2sub(C, D, t1); // t1 = (C-D)
+    fp2sqr_mont(t0, t0); // t0 = (C+D)^2
+    fp2sqr_mont(t1, CmDsq); // CmDsq=(C-D)^2
+    fp2sub(t0, CmDsq, CD4);
+}
+
+// 
+void eval_5_isog(point_proj_t Q, const point_proj_t P, const point_proj_t P2)
+{ // Computes the 5-isogeny R=phi(X:Z), given projective point (X5:Z5) of order 5 on a Montgomery curve
+  // Inputs: projective points P = (X5:Z5), 2P, and Q = (X:Z).
+  // Output: the projective point Q <- phi(Q) = (X5:Z5). 
+    f2elm_t t0, t1, t2, t3, t4, t5;
+
+    mp2_add(P->X, P->Z, t0);      // t0 = X1+Z1
+    mp2_sub_p2(P->X, P->Z, t1);   // t1 = X1-Z1
+
+    mp2_add(Q->X, Q->Z, t4);      // t4 = X+Z
+    mp2_sub_p2(Q->X, Q->Z, t5);   // t5 = X-Z
+
+    fp2mul_mont(t0, t5, t0);      // t0 = (X1+Z1)(X-Z) = XX1-ZX1+XZ1-ZZ1
+    fp2mul_mont(t1, t4, t1);      // t1 = (X1-Z1)(X+Z) = XX1+ZX1-XZ1-ZZ1
+
+    mp2_add(t0, t1, t2);          // t2 = 2(XX1-ZZ1) // x-coordinate
+    mp2_sub_p2(t0, t1, t3);       // t3 = 2(-ZX1+XZ1) // Z-coordinate
+
+
+    mp2_add(P2->X, P2->Z, t0);    // t0 = X2+Z2
+    mp2_sub_p2(P2->X, P2->Z, t1);  // t1 = X2-Z2
+
+    fp2mul_mont(t0, t5, t0);      // t0 = (X2+Z2)(X-Z) = XX2-ZX2+XZ2-ZZ2
+    fp2mul_mont(t1, t4, t1);      // t1 = (X2-Z2)(X+Z) = XX2+ZX2-XZ2-ZZ2
+
+    mp2_add(t0, t1, t4);          // t4 = 2(XX2-ZZ2) // x-coordinate
+    mp2_sub_p2(t0, t1, t5);       // t5 = 2(-ZX2+XZ2) // Z-coordinate
+ 
+    fp2mul_mont(t2, t4, t2);      // t2 = 2(XX1-ZZ1) * 2(XX2-ZZ2) //x
+    fp2mul_mont(t3, t5, t3);      // t3 = 2(-ZX1+XZ1) * 2(-ZX2+XZ2) 
+    fp2sqr_mont(t2, t2);
+    fp2sqr_mont(t3, t3);    
+
+    fp2mul_mont(Q->X, t2, Q->X);
+    fp2mul_mont(Q->Z, t3, Q->Z);
+
+
+}
+
+
+void eval_5_isog_Huff(point_proj_t Q, const f2elm_t* coeff)
+{ // Computes the 5-isogeny R=phi(X:Z), given projective point (X5:Z5) of order 5 on a Huff curve and 
+  // a point P with 4 coefficients in coeff (computed in the function get_5_isog_Huff()).
+  // Inputs: projective points P = (X5:Z5) and Q = (X:Z).
+  // Output: the projective point Q <- phi(Q) = (X5:Z5). 
+    f2elm_t t0, t1, t2, t3, t4, t5;
+
+    fp2add(Q->X, Q->Z, t0);                       // t0 = X+Z
+    fp2sub(Q->X, Q->Z, t1);                       // t1 = X-Z
+    fp2mul_mont(coeff[0], t1, t2);                // t2 = (Xi+Zi)(X-Z)=XXi-XZi+ZiX-ZZi
+    fp2mul_mont(coeff[1], t0, t3);                // t3 = (Xi-Zi)(X+Z)=XXi+XZi-ZiX-ZZi
+    fp2add(t2, t3, t4);                           // t4 = 2(XXi-ZZi) // z'
+    fp2sub(t3, t2, t5);                           // t5 = 2(XiZ-ZiX) // w'
+    fp2mul_mont(coeff[2], t1, t1);                // t1 = (X2i+Z2i)(X-Z)=XX2-X2Z+Z2X-Z2Z
+    fp2mul_mont(coeff[3], t0, t0);                // t0 = (X2i-Z2i)(X+Z)=XX2+X2Z-Z2X-Z2Z
+    fp2add(t0, t1, t2);                           // t2 = 2(X2X-Z2Z) //z'
+    fp2sub(t1, t0, t3);                           // t3 = XiZ-ZiX //w'
+    fp2mul_mont(t2, t4, t2); //z
+    fp2mul_mont(t3, t5, t3); //w
+    fp2sqr_mont(t2, t2); //z
+    fp2sqr_mont(t3, t3); //w
+    fp2mul_mont(Q->Z, t2, Q->Z);
+    fp2mul_mont(Q->X, t3, Q->X);
+}
+
+
+void get_2torsion(const f2elm_t A, point_proj_t Q)
+{ // Given the value A corresponding to the Montgomery curve E_A: y^2=x^3+A*x^2+x, output 2-torsion point on E_A
+  // Input:  the coefficient A of a Montgomery curve
+  // Output: two torsion point Q on Montgomery curve E_A: y^2=x^3+A*x^2+x.
+    f2elm_t t0, t1, one = {0}, t2;
+    
+    fpcopy((digit_t*)&Montgomery_one, one[0]); 
+    fpcopy((digit_t*)&Montgomery_one, Q->Z[0]);
+    fp2add(one, one, one);                        // one = 2
+    fp2add(one, one, one);                        // one = 4
+    fp2sqr_mont(A, t0);                           // t0 = A^2
+    fp2sub(t0, one, t0);                          // t0 = A^2-4
+    fp2sqrt_mont(t0, t0);                         // t2 =sqrt(A^2-4)
+    fp2sub(t0, A, t0);                           // t0 = sqrt(A^2-4)-A
+    fp2div2(t0, Q->X);                              
+
+}
+
+void get_C(const f2elm_t A, f2elm_t C)
+{ // Given the value A=c+1/c-2 corresponding to the Huff curve E_c: cx(y^2-1)=y(x^2-1), output the corresponding Huff coeffiecient c
+  // Input:  the recovered value A=c+1/c-2  of a Huff curve
+  // Output: coeffiecient c of a Huff curve E_c: cx(y^2-1)=y(x^2-1)
+    f2elm_t t0, t1, one = {0}, t2;
+    
+    fpcopy((digit_t*)&Montgomery_one, one[0]); 
+ 
+    fp2add(one, one, one);                        // one = 2
+    fp2add(A, one, t0);                           // t0 = A+2
+    fp2add(one, one, one);                        // one = 4
+
+
+    fp2sqr_mont(t0, t1);                           // t1 = (A+2)^2
+    fp2sub(t1, one, t1);                          // t1 = (A+2)^2-4
+    fp2sqrt_mont(t1, t1);                         // t1 =sqrt((A+2)^2-4)
+
+
+    fp2add(t1, t0, t0);                           // t0 = sqrt(A^2-4)+(A+2)
+    fp2div2(t0, C);                              
+
+}
+
+
+
+
+void inv_3_way(f2elm_t z1, f2elm_t z2, f2elm_t z3)
+{ // 3-way simultaneous inversion
+  // Input:  z1,z2,z3
+  // Output: 1/z1,1/z2,1/z3 (override inputs).
+    f2elm_t t0, t1, t2, t3;
+
+    fp2mul_mont(z1, z2, t0);                      // t0 = z1*z2
+    fp2mul_mont(z3, t0, t1);                      // t1 = z1*z2*z3
+    fp2inv_mont(t1);                              // t1 = 1/(z1*z2*z3)
+    fp2mul_mont(z3, t1, t2);                      // t2 = 1/(z1*z2) 
+    fp2mul_mont(t2, z2, t3);                      // t3 = 1/z1
+    fp2mul_mont(t2, z1, z2);                      // z2 = 1/z2
+    fp2mul_mont(t0, t1, z3);                      // z3 = 1/z3
+    fp2copy(t3, z1);                              // z1 = 1/z1
+}
+
+
+void get_A(const f2elm_t xP, const f2elm_t xQ, const f2elm_t xR, f2elm_t A)
+{ // Given the x-coordinates of P, Q, and R, returns the value A corresponding to the Montgomery curve E_A: y^2=x^3+A*x^2+x such that R=Q-P on E_A.
+  // Input:  the x-coordinates xP, xQ, and xR of the points P, Q and R.
+  // Output: the coefficient A corresponding to the curve E_A: y^2=x^3+A*x^2+x.
+    f2elm_t t0, t1, one = {0};
+    
+    fpcopy((digit_t*)&Montgomery_one, one[0]);
+    fp2add(xP, xQ, t1);                           // t1 = xP+xQ
+    fp2mul_mont(xP, xQ, t0);                      // t0 = xP*xQ
+    fp2mul_mont(xR, t1, A);                       // A = xR*t1
+    fp2add(t0, A, A);                             // A = A+t0
+    fp2mul_mont(t0, xR, t0);                      // t0 = t0*xR
+    fp2sub(A, one, A);                            // A = A-1
+    fp2add(t0, t0, t0);                           // t0 = t0+t0
+    fp2add(t1, xR, t1);                           // t1 = t1+xR
+    fp2add(t0, t0, t0);                           // t0 = t0+t0
+    fp2sqr_mont(A, A);                            // A = A^2
+    fp2inv_mont(t0);                              // t0 = 1/t0
+    fp2mul_mont(A, t0, A);                        // A = A*t0
+    fp2sub(A, t1, A);                             // Afinal = A-t1
+}
+
+
+void get_A_Huff(const f2elm_t xP, const f2elm_t xQ, const f2elm_t xR, f2elm_t A)
+{ // Given the w-coordinates of P, Q, and R, returns the value A=c+1/c-2 corresponding to the Huff curve E_c: cx(y^2-1)=y(x^2-1) such that R=Q-P on E_c.
+  // Input:  the w-coordinates xP, xQ, and xR of the points P, Q and R.
+  // Output: the value A=c+1/c-2 corresponding to the curve E_c: cx(y^2-1)=y(x^2-1).
+    f2elm_t t0, t1;
+
+    fp2mul_mont(xR, xP, t0);                     // t0 = wR*wP
+    fp2mul_mont(t0, xQ, t1);                     // t1 = wR*wP*wQ
+
+    fp2sub(xP, xQ, A);                           // A = wP-wQ 
+    fp2sub(A, t1, A);                            // A = wP-wQ-wR*wP*wQ
+    fp2add(A, xR, A);                            // A = wP-wQ-wR*wP*wQ+wR   
+    fp2sqr_mont(A, A);                           // A = (wP-wQ-wR*wP*wQ+wR)^2
+
+    fp2add(t1, t1, t1);                          // t1 = 2wR*wP*wQ
+    fp2add(t1, t1, t1);                          // t1 = 4wR*wP*wQ
+
+    fp2add(t0, t0, t0);                         // t0 = 2wR*wP
+    fp2add(t0, t1, t0);                         // t0 = 4wR*wP*wQ + 2wR*wP
+    fp2add(t0, t0, t0);                         // t0 = 8wR*wP*wQ + 4wR*wP
+    fp2sub(A, t0, A);                           // A = (wP-wQ-wR*wP*wQ+wR)^2- 8wR*wP*wQ - 4wR*wP
+
+    fp2inv_mont(t1);                            // t1 = 1/4wR*wP*wQ
+    fp2mul_mont(A, t1, A);                      // A = ((wP-wQ-wR*wP*wQ+wR)^2- 8wR*wP*wQ - 4wR*wP)/4wR*wP*wQ
+    fp2sub(A, xQ, A);                           // A = ((wP-wQ-wR*wP*wQ+wR)^2- 8wR*wP*wQ - 4wR*wP)/4wR*wP*wQ-wQ
+}
+
+
+
+void j_inv(const f2elm_t A, const f2elm_t C, f2elm_t jinv)
+{ // Computes the j-invariant of a Montgomery curve with projective constant.
+  // Input: A,C in GF(p^2).
+  // Output: j=256*(A^2-3*C^2)^3/(C^4*(A^2-4*C^2)), which is the j-invariant of the Montgomery curve B*y^2=x^3+(A/C)*x^2+x or (equivalently) j-invariant of B'*y^2=C*x^3+A*x^2+C*x.
+    f2elm_t t0, t1;
+    
+    fp2sqr_mont(A, jinv);                           // jinv = A^2        
+    fp2sqr_mont(C, t1);                             // t1 = C^2
+    fp2add(t1, t1, t0);                             // t0 = t1+t1
+    fp2sub(jinv, t0, t0);                           // t0 = jinv-t0
+    fp2sub(t0, t1, t0);                             // t0 = t0-t1
+    fp2sub(t0, t1, jinv);                           // jinv = t0-t1
+    fp2sqr_mont(t1, t1);                            // t1 = t1^2
+    fp2mul_mont(jinv, t1, jinv);                    // jinv = jinv*t1
+    fp2add(t0, t0, t0);                             // t0 = t0+t0
+    fp2add(t0, t0, t0);                             // t0 = t0+t0
+    fp2sqr_mont(t0, t1);                            // t1 = t0^2
+    fp2mul_mont(t0, t1, t0);                        // t0 = t0*t1
+    fp2add(t0, t0, t0);                             // t0 = t0+t0
+    fp2add(t0, t0, t0);                             // t0 = t0+t0
+    fp2inv_mont(jinv);                              // jinv = 1/jinv 
+    fp2mul_mont(jinv, t0, jinv);                    // jinv = t0*jinv
+}
+
+
+
+void j_inv_Huff(const f2elm_t CpD, const f2elm_t CmD, const f2elm_t CD4, f2elm_t jinv)
+{ // Computes the j-invariant of a Huff curve with projective constant.
+  // Input: CpD=(C+D)^2, CmD=(C-D)^2, CD4=4CD in GF(p^2).
+  // Output: j=256*(C^4-C^2D^2+D^4)^3/(C^4D^4*(A^2-C^2)^2), which is the j-invariant of the Huff curve (C/D)x(y^2-1)=y(x^2-1) or (equivalently) j-invariant of  Cx(y^2-1)=Dy(x^2-1)
+    f2elm_t t0, t1, t2;
+    
+    fp2mul_mont(CpD, CmD, t0);              // t0 = (C-D)^2(C+D)^2
+    fp2sqr_mont(CD4, t1);                   // t1 = 2^4(C^2D^2)
+    fp2sqr_mont(t1, t2);                    // t2 = 2^8(C^4D^4)
+    fp2mul_mont(t0, t2, t2);                // t2 = 2^8(C^4D^4)(C-D)^2(C+D)^2
+    fp2add(t1, t1, t1);                     // t1 = 2^5(C^2D^2)
+    fp2add(t0, t0, t0);                     // t0 = 2*(C-D)^2(C+D)^2
+    fp2add(t0, t0, t0);                     // t0 = 4*t0
+    fp2add(t0, t0, t0);                     // t0 = 8*t0
+    fp2add(t0, t0, t0);                     // t0 = 16*t0
+    fp2add(t0, t0, t0);                     // t0 = 32*C-D)^2(C+D)^2
+    fp2add(t0, t1, t1);                     // t1  =32(C^4-C^2D^2+D^4)
+    fp2sqr_mont(t1, t0);                    // t0 = 2^10*A^2                 
+    fp2mul_mont(t0, t1, t0);                // t0 = 2^15*A^3  
+    fp2add(t0, t0, t0);                       // t0 = 2^16*A^3 
+    fp2inv_mont(t2);
+    fp2mul_mont(t0, t2, jinv);
+}
+
+
+
+void xDBLADD(point_proj_t P, point_proj_t Q, const f2elm_t xPQ, const f2elm_t A24)
+{ // Simultaneous doubling and differential addition.
+  // Input: projective Montgomery points P=(XP:ZP) and Q=(XQ:ZQ) such that xP=XP/ZP and xQ=XQ/ZQ, affine difference xPQ=x(P-Q) and Montgomery curve constant A24=(A+2)/4.
+  // Output: projective Montgomery points P <- 2*P = (X2P:Z2P) such that x(2P)=X2P/Z2P, and Q <- P+Q = (XQP:ZQP) such that = x(Q+P)=XQP/ZQP. 
+    f2elm_t t0, t1, t2;
+
+    mp2_add(P->X, P->Z, t0);                        // t0 = XP+ZP
+    mp2_sub_p2(P->X, P->Z, t1);                     // t1 = XP-ZP
+    fp2sqr_mont(t0, P->X);                          // XP = (XP+ZP)^2
+    mp2_sub_p2(Q->X, Q->Z, t2);                     // t2 = XQ-ZQ
+    mp2_add(Q->X, Q->Z, Q->X);                      // XQ = XQ+ZQ
+    fp2mul_mont(t0, t2, t0);                        // t0 = (XP+ZP)*(XQ-ZQ)
+    fp2sqr_mont(t1, P->Z);                          // ZP = (XP-ZP)^2
+    fp2mul_mont(t1, Q->X, t1);                      // t1 = (XP-ZP)*(XQ+ZQ)
+    mp2_sub_p2(P->X, P->Z, t2);                     // t2 = (XP+ZP)^2-(XP-ZP)^2
+    fp2mul_mont(P->X, P->Z, P->X);                  // XP = (XP+ZP)^2*(XP-ZP)^2
+    fp2mul_mont(A24, t2, Q->X);                     // XQ = A24*[(XP+ZP)^2-(XP-ZP)^2]
+    mp2_sub_p2(t0, t1, Q->Z);                       // ZQ = (XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)
+    mp2_add(Q->X, P->Z, P->Z);                      // ZP = A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP-ZP)^2
+    mp2_add(t0, t1, Q->X);                          // XQ = (XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)
+    fp2mul_mont(P->Z, t2, P->Z);                    // ZP = [A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP-ZP)^2]*[(XP+ZP)^2-(XP-ZP)^2]
+    fp2sqr_mont(Q->Z, Q->Z);                        // ZQ = [(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2
+    fp2sqr_mont(Q->X, Q->X);                        // XQ = [(XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)]^2
+    fp2mul_mont(Q->Z, xPQ, Q->Z);                   // ZQ = xPQ*[(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2
+}
+
+// A24 = 1/4(c+1/c-2)
+void xDBLADD_Huff(point_proj_t P, point_proj_t Q, const f2elm_t xPQ, const f2elm_t A24)
+{ // Simultaneous doubling and differential addition.
+  // Input: projective Huff points P=(XP:ZP) and Q=(XQ:ZQ) such that wP=XP/ZP and wQ=XQ/ZQ, affine difference wPQ=w(P-Q) and Huff curve constant A24=1/4(c+1/c-2).
+  // Output: projective Huff points P <- 2*P = (X2P:Z2P) such that w(2P)=X2P/Z2P, and Q <- P+Q = (XQP:ZQP) such that = w(Q+P)=XQP/ZQP. 
+    f2elm_t t0, t1, t2, t3;
+
+    mp2_add(P->X, P->Z, t0);                        // t0 = XP+ZP
+    mp2_sub_p2(P->X, P->Z, t1);                     // t1 = XP-ZP
+    fp2sqr_mont(t0, t3);                          // t3 = (XP+ZP)^2
+    mp2_sub_p2(Q->X, Q->Z, t2);                     // t2 = XQ-ZQ
+    mp2_add(Q->X, Q->Z, Q->Z);                      // ZQ = XQ+ZQ
+    fp2mul_mont(t0, t2, t0);                        // t0 = (XP+ZP)*(XQ-ZQ)
+    fp2sqr_mont(t1, P->X);                          // XP = (XP-ZP)^2
+    fp2mul_mont(t1, Q->Z, t1);                      // t1 = (XP-ZP)*(XQ+ZQ)
+    mp2_sub_p2(t3, P->X, t2);                     // t2 = (XP+ZP)^2-(XP-ZP)^2 // 4XpZp
+    fp2mul_mont(t3, P->X, P->Z);                  // ZP = (XP+ZP)^2*(XP-ZP)^2
+
+    fp2mul_mont(A24, t2, Q->Z);                     // ZQ = A24*[(XP+ZP)^2-(XP-ZP)^2] = 4CXPZP
+    mp2_sub_p2(t0, t1, Q->X);                       // XQ = (XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)
+    mp2_add(Q->Z, t3, P->X);                      // XP = A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP+ZP)^2
+    mp2_add(t0, t1, Q->Z);                          // ZQ = (XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ) = XpXq-ZpZq
+    fp2mul_mont(P->X, t2, P->X);                    // XP = [A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP-ZP)^2]*[(XP+ZP)^2-(XP-ZP)^2]
+    fp2sqr_mont(Q->X, Q->X);                        // XQ = [(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2
+    fp2sqr_mont(Q->Z, Q->Z);                        // ZQ = [(XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)]^2 //XpXq-ZpZq
+
+    fp2mul_mont(Q->Z, xPQ, Q->Z);                   // ZQ = xPQ*[(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2
+}
+
+
+static void swap_points(point_proj_t P, point_proj_t Q, const digit_t option)
+{ // Swap points.
+  // If option = 0 then P <- P and Q <- Q, else if option = 0xFF...FF then P <- Q and Q <- P
+    digit_t temp;
+    unsigned int i;
+
+    for (i = 0; i < NWORDS_FIELD; i++) {
+        temp = option & (P->X[0][i] ^ Q->X[0][i]);
+        P->X[0][i] = temp ^ P->X[0][i]; 
+        Q->X[0][i] = temp ^ Q->X[0][i];  
+        temp = option & (P->X[1][i] ^ Q->X[1][i]);
+        P->X[1][i] = temp ^ P->X[1][i]; 
+        Q->X[1][i] = temp ^ Q->X[1][i];
+        temp = option & (P->Z[0][i] ^ Q->Z[0][i]);
+        P->Z[0][i] = temp ^ P->Z[0][i]; 
+        Q->Z[0][i] = temp ^ Q->Z[0][i];
+        temp = option & (P->Z[1][i] ^ Q->Z[1][i]);
+        P->Z[1][i] = temp ^ P->Z[1][i]; 
+        Q->Z[1][i] = temp ^ Q->Z[1][i]; 
+    }
+}
+
+
+static void LADDER3PT(const f2elm_t xP, const f2elm_t xQ, const f2elm_t xPQ, const digit_t* m, const unsigned int AliceOrBob, point_proj_t R, const f2elm_t A)
+{
+    point_proj_t R0 = {0}, R2 = {0};
+    f2elm_t A24 = {0};
+    digit_t mask;
+    int i, nbits, bit, swap, prevbit = 0;
+
+    if (AliceOrBob == ALICE) {
+        nbits = OALICE_BITS;
+    } else {
+        nbits = OBOB_BITS - 1;
+    }
+
+    // Initializing constant
+    fpcopy((digit_t*)&Montgomery_one, A24[0]);
+    mp2_add(A24, A24, A24);
+    mp2_add(A, A24, A24);
+    fp2div2(A24, A24);  
+    fp2div2(A24, A24);  // A24 = (A+2)/4
+
+    // Initializing points
+    fp2copy(xQ, R0->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R0->Z);
+    fp2copy(xPQ, R2->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R2->Z);
+    fp2copy(xP, R->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R->Z);
+    fpzero((digit_t*)(R->Z)[1]);
+
+    // Main loop
+    for (i = 0; i < nbits; i++) {
+        bit = (m[i >> LOG2RADIX] >> (i & (RADIX-1))) & 1;
+        swap = bit ^ prevbit;
+        prevbit = bit;
+        mask = 0 - (digit_t)swap;
+
+        swap_points(R, R2, mask);
+        xDBLADD(R0, R2, R->X, A24);
+        fp2mul_mont(R2->X, R->Z, R2->X);
+    }
+    swap = 0 ^ prevbit;
+    mask = 0 - (digit_t)swap;
+    swap_points(R, R2, mask);
+}
+
+
+
+static void LADDER3PT_Huff(const f2elm_t xP, const f2elm_t xQ, const f2elm_t xPQ, const digit_t* m, const unsigned int AliceOrBob, point_proj_t R, const f2elm_t A)
+{
+    point_proj_t R0 = {0}, R2 = {0};
+    f2elm_t A24 = {0}, t0={0};
+    digit_t mask;
+    int i, nbits, bit, swap, prevbit = 0;
+
+    if (AliceOrBob == ALICE) {
+        nbits = OALICE_BITS;
+    } else {
+        nbits = OBOB_BITS - 1;
+    }
+
+    // Initializing constant
+    fp2copy(A, A24);              
+    fp2div2(A24, A24);  
+    fp2div2(A24, A24);  
+
+    // Initializing points
+    fp2copy(xQ, R0->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R0->Z);
+    fp2copy(xPQ, R2->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R2->Z);
+    fp2copy(xP, R->X);
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)R->Z);
+    fpzero((digit_t*)(R->Z)[1]);
+
+    // Main loop
+    for (i = 0; i < nbits; i++) {
+        bit = (m[i >> LOG2RADIX] >> (i & (RADIX-1))) & 1;
+        swap = bit ^ prevbit;
+        prevbit = bit;
+        mask = 0 - (digit_t)swap;
+
+        swap_points(R, R2, mask);
+        xDBLADD_Huff(R0, R2, R->X, A24);
+        fp2mul_mont(R2->X, R->Z, R2->X);
+    }
+    swap = 0 ^ prevbit;
+    mask = 0 - (digit_t)swap;
+    swap_points(R, R2, mask);
+}
+
+
+
+
+#ifdef COMPRESS
+
+static void CompletePoint(const point_proj_t P, point_full_proj_t R)
+{ // Complete point on A = 0 curve
+    f2elm_t xz, s2, r2, yz, invz, t0, t1, one = {0};
+
+    fpcopy((digit_t*)&Montgomery_one, one[0]);
+    fp2mul_mont(P->X, P->Z, xz);
+    fpsub(P->X[0], P->Z[1], t0[0]);
+    fpadd(P->X[1], P->Z[0], t0[1]);
+    fpadd(P->X[0], P->Z[1], t1[0]);
+    fpsub(P->X[1], P->Z[0], t1[1]);
+    fp2mul_mont(t0, t1, s2);
+    fp2mul_mont(xz, s2, r2);
+    sqrt_Fp2(r2, yz);
+    fp2copy(P->Z,invz);
+    fp2inv_mont_bingcd(invz);    
+    fp2mul_mont(P->X, invz, R->X);
+    fp2sqr_mont(invz, t0);
+    fp2mul_mont(yz, t0, R->Y);
+    fp2copy(one, R->Z);
+}
+
+
+void CompleteMPoint(const f2elm_t A, point_proj_t P, point_full_proj_t R)
+{ // Given an xz-only representation on a montgomery curve, compute its affine representation
+    f2elm_t zero = {0}, one = {0}, xz, yz, s2, r2, invz, temp0, temp1;
+
+    fpcopy((digit_t*)&Montgomery_one, one[0]);    
+    if (memcmp(P->Z[0], zero,NBITS_TO_NBYTES(NBITS_FIELD)) != 0 || memcmp(P->Z[1], zero, NBITS_TO_NBYTES(NBITS_FIELD)) != 0) {
+        fp2mul_mont(P->X, P->Z, xz);       // xz = x*z;
+        fpsub(P->X[0], P->Z[1], temp0[0]);
+        fpadd(P->X[1], P->Z[0], temp0[1]);
+        fpadd(P->X[0], P->Z[1], temp1[0]);
+        fpsub(P->X[1], P->Z[0], temp1[1]);        
+        fp2mul_mont(temp0, temp1, s2);     // s2 = (x + i*z)*(x - i*z);
+        fp2mul_mont(A, xz, temp0);
+        fp2add(temp0, s2, temp1);
+        fp2mul_mont(xz, temp1, r2);        // r2 = xz*(A*xz + s2);
+        sqrt_Fp2(r2, yz);
+        fp2copy(P->Z, invz);
+        fp2inv_mont_bingcd(invz);        
+        fp2mul_mont(P->X, invz, R->X);
+        fp2sqr_mont(invz, temp0);
+        fp2mul_mont(yz, temp0, R->Y);      // R = EM![x*invz, yz*invz^2];
+        fp2copy(one, R->Z);
+    } else {
+        fp2copy(zero, R->X);
+        fp2copy(one, R->Y); 
+        fp2copy(zero, R->Z);               // R = EM!0;
+    }
+}
+
+
+void Double(point_proj_t P, point_proj_t Q, f2elm_t A24, const int k)
+{ // Doubling of a Montgomery point in projective coordinates (X:Z) over affine curve coefficient A. 
+  // Input: projective Montgomery x-coordinates P = (X1:Z1), where x1=X1/Z1 and Montgomery curve constants (A+2)/4.
+  // Output: projective Montgomery x-coordinates Q = 2*P = (X2:Z2). 
+    f2elm_t temp, a, b, c, aa, bb;    
+    
+    fp2copy(P->X, Q->X);
+    fp2copy(P->Z, Q->Z);
+    
+    for (int j = 0; j < k; j++) {
+        fp2add(Q->X, Q->Z, a);
+        fp2sub(Q->X, Q->Z, b);
+        fp2sqr_mont(a, aa);
+        fp2sqr_mont(b, bb);
+        fp2sub(aa, bb, c);
+        fp2mul_mont(aa, bb, Q->X);
+        fp2mul_mont(A24, c, temp);
+        fp2add(temp, bb, temp);
+        fp2mul_mont(c, temp, Q->Z);
+    }
+}
+
+
+void xTPL_fast(const point_proj_t P, point_proj_t Q, const f2elm_t A2)
+{ // Montgomery curve (E: y^2 = x^3 + A*x^2 + x) x-only tripling at a cost 5M + 6S + 9A = 27p + 61a.
+  // Input : projective Montgomery x-coordinates P = (X:Z), where x=X/Z and Montgomery curve constant A/2. 
+  // Output: projective Montgomery x-coordinates Q = 3*P = (X3:Z3).
+       f2elm_t t1, t2, t3, t4;
+       
+       fp2sqr_mont(P->X, t1);        // t1 = x^2
+       fp2sqr_mont(P->Z, t2);        // t2 = z^2
+       fp2add(t1, t2, t3);           // t3 = t1 + t2
+       fp2add(P->X, P->Z, t4);       // t4 = x + z
+       fp2sqr_mont(t4, t4);          // t4 = t4^2
+       fp2sub(t4, t3, t4);           // t4 = t4 - t3
+       fp2mul_mont(A2, t4, t4);      // t4 = t4*A2
+       fp2add(t3, t4, t4);           // t4 = t4 + t3
+       fp2sub(t1, t2, t3);           // t3 = t1 - t2
+       fp2sqr_mont(t3, t3);          // t3 = t3^2
+       fp2mul_mont(t1, t4, t1);      // t1 = t1*t4
+       fp2shl(t1, 2, t1);            // t1 = 4*t1
+       fp2sub(t1, t3, t1);           // t1 = t1 - t3
+       fp2sqr_mont(t1, t1);          // t1 = t1^2
+       fp2mul_mont(t2, t4, t2);      // t2 = t2*t4
+       fp2shl(t2, 2, t2);            // t2 = 4*t2
+       fp2sub(t2, t3, t2);           // t2 = t2 - t3
+       fp2sqr_mont(t2, t2);          // t2 = t2^2
+       fp2mul_mont(P->X, t2, Q->X);  // x = x*t2
+       fp2mul_mont(P->Z, t1, Q->Z);  // z = z*t1    
+}
+
+
+void xTPLe_fast(point_proj_t P, point_proj_t Q, const f2elm_t A2, int e)
+{ // Computes [3^e](X:Z) on Montgomery curve with projective constant via e repeated triplings. e triplings in E costs k*(5M + 6S + 9A)
+  // Input: projective Montgomery x-coordinates P = (X:Z), where x=X/Z, Montgomery curve constant A2 = A/2 and the number of triplings e.
+  // Output: projective Montgomery x-coordinates Q <- [3^e]P.    
+    point_proj_t T;
+
+    copy_words((digit_t*)P, (digit_t*)T, 2*2*NWORDS_FIELD);
+    for (int j = 0; j < e; j++) { 
+        xTPL_fast(T, T, A2);
+    }
+    copy_words((digit_t*)T, (digit_t*)Q, 2*2*NWORDS_FIELD);
+}
+
+
+void ADD(const point_full_proj_t P, const f2elm_t QX, const f2elm_t QY, const f2elm_t QZ, const f2elm_t A, point_full_proj_t R)
+{ // General addition.
+  // Input: projective Montgomery points P=(XP:YP:ZP) and Q=(XQ:YQ:ZQ).
+  // Output: projective Montgomery point R <- P+Q = (XQP:YQP:ZQP). 
+    f2elm_t t0 = {0}, t1 = {0}, t2 = {0}, t3 = {0}, t4 = {0}, t5 = {0}, t6 = {0}, t7 = {0};
+
+    fp2mul_mont(QX, P->Z, t0);            // t0 = x2*Z1    
+    fp2mul_mont(P->X, QZ, t1);            // t1 = X1*z2    
+    fp2add(t0, t1, t2);                   // t2 = t0 + t1
+    fp2sub(t1, t0, t3);                   // t3 = t1 - t0
+    fp2mul_mont(QX, P->X, t0);            // t0 = x2*X1    
+    fp2mul_mont(P->Z, QZ, t1);            // t1 = Z1*z2
+    fp2add(t0, t1, t4);                   // t4 = t0 + t1
+    fp2mul_mont(t0, A, t0);               // t0 = t0*A
+    fp2mul_mont(QY, P->Y, t5);            // t5 = y2*Y1
+    fp2sub(t0, t5, t0);                   // t0 = t0 - t5
+    fp2mul_mont(t0, t1, t0);              // t0 = t0*t1
+    fp2add(t0, t0, t0);                   // t0 = t0 + t0
+    fp2mul_mont(t2, t4, t5);              // t5 = t2*t4
+    fp2add(t5, t0, t5);                   // t5 = t5 + t0
+    fp2sqr_mont(P->X, t0);                // t0 = X1 ^ 2
+    fp2sqr_mont(P->Z, t6);                // t6 = Z1 ^ 2
+    fp2add(t0, t6, t0);                   // t0 = t0 + t6    
+    fp2add(t1, t1, t1);                   // t1 = t1 + t1
+    fp2mul_mont(QY, P->X, t7);            // t7 = y2*X1
+    fp2mul_mont(QX, P->Y, t6);            // t6 = x2*Y1
+    fp2sub(t7, t6, t7);                   // t7 = t7 - t6
+    fp2mul_mont(t1, t7, t1);              // t1 = t1*t7
+    fp2mul_mont(A, t2, t7);               // t7 = A*t2
+    fp2add(t7, t4, t4);                   // t4 = t4 + t7
+    fp2mul_mont(t1, t4, t4);              // t4 = t1*t4
+    fp2mul_mont(QY, QZ, t1);              // t1 = y2*z2
+    fp2mul_mont(t0, t1, t0);              // t0 = t0*t1
+    fp2sqr_mont(QZ, t1);                  // t1 = z2 ^ 2
+    fp2sqr_mont(QX, t6);                  // t6 = x2 ^ 2
+    fp2add(t1, t6, t1);                   // t1 = t1 + t6
+    fp2mul_mont(P->Z, P->Y, t6);          // t6 = Z1*Y1
+    fp2mul_mont(t1, t6, t1);              // t1 = t1*t6
+    fp2sub(t0, t1, t0);                   // t0 = t0 - t1
+    fp2mul_mont(t2, t0, t0);              // t0 = t2*t0
+    fp2mul_mont(t5, t3, R->X);            // X3 = t5*t3    
+    fp2add(t4, t0, R->Y);                 // Y3 = t4 + t0
+    fp2sqr_mont(t3, t0);                  // t0 = t3 ^ 2
+    fp2mul_mont(t3, t0, R->Z);            // Z3 = t3*t0
+}
+
+
+void Mont_ladder(const f2elm_t x, const digit_t* m, point_proj_t P, point_proj_t Q, const f2elm_t A24, const unsigned int order_bits, const unsigned int order_fullbits)
+{ // The Montgomery ladder
+  // Inputs: the affine x-coordinate of a point P on E: B*y^2=x^3+A*x^2+x, 
+  //         scalar m
+  //         curve constant A24 = (A+2)/4
+  //         order_bits = subgroup order bitlength
+  //         order_fullbits = smallest multiple of 32 larger than the order bitlength
+  // Output: P = m*(x:1)
+    unsigned int bit = 0, owords = NBITS_TO_NWORDS(order_fullbits);
+    digit_t mask, scalar[NWORDS_ORDER];
+    int i;
+    
+    // Initializing with the points (1:0) and (x:1)
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)P->X[0]);
+    fpzero(P->X[1]);
+    fp2zero(P->Z);
+    
+    fp2copy(x, Q->X);    
+    fpcopy((digit_t*)&Montgomery_one, (digit_t*)Q->Z[0]);    
+    fpzero(Q->Z[1]);
+
+    for (i = NWORDS_ORDER-1; i >= 0; i--) {
+        scalar[i] = m[i];
+    }
+    
+    for (i = order_fullbits-order_bits; i > 0; i--) {
+        mp_shiftl1(scalar, owords);
+    }    
+    
+    for (i = order_bits; i > 0; i--) {
+        bit = (unsigned int)(scalar[owords-1] >> (RADIX-1));
+        mp_shiftl1(scalar, owords);
+        mask = 0-(digit_t)bit;
+
+        swap_points(P, Q, mask);        
+        xDBLADD(P, Q, x, A24);                     // If bit=0 then P <- 2*P and Q <- P+Q, 
+        swap_points(P, Q, mask);                   // else if bit=1 then Q <- 2*Q and P <- P+Q
+    }
+}
+
+
+void mont_twodim_scalarmult(digit_t* a, const point_t R, const point_t S, const f2elm_t A, const f2elm_t A24, point_full_proj_t P, const unsigned int order_bits)
+{ // Computes P = R + [a]S  
+    point_proj_t P0 = {0}, P1 = {0};
+    point_full_proj_t P2 = {0};
+    f2elm_t one = {0};    
+
+    fpcopy((digit_t*)&Montgomery_one, one[0]);
+    Mont_ladder(S->x, a, P0, P1, A24, order_bits, MAXBITS_ORDER);    
+    recover_os(P0->X, P0->Z, P1->X, P1->Z, S->x, S->y, A, P2->X, P2->Y, P2->Z);     
+    ADD(P2, R->x, R->y, one, A, P);       
+}
+
+
+void xDBLADD_proj(point_proj_t P, point_proj_t Q, const f2elm_t XPQ, const f2elm_t ZPQ, const f2elm_t A24)
+{ // Simultaneous doubling and differential addition.
+  // Input: projective Montgomery points P=(XP:ZP) and Q=(XQ:ZQ) such that xP=XP/ZP and xQ=XQ/ZQ, affine difference xPQ=x(P-Q) and Montgomery curve constant A24=(A+2)/4.
+  // Output: projective Montgomery points P <- 2*P = (X2P:Z2P) such that x(2P)=X2P/Z2P, and Q <- P+Q = (XQP:ZQP) such that = x(Q+P)=XQP/ZQP. 
+    f2elm_t t0, t1, t2;
+
+    fp2add(P->X, P->Z, t0);                         // t0 = XP+ZP
+    fp2sub(P->X, P->Z, t1);                         // t1 = XP-ZP    
+    fp2sqr_mont(t0, P->X);                          // XP = (XP+ZP)^2    
+    fp2sub(Q->X, Q->Z, t2);                         // t2 = XQ-ZQ
+    fp2correction(t2);    
+    fp2add(Q->X, Q->Z, Q->X);                       // XQ = XQ+ZQ    
+    fp2mul_mont(t0, t2, t0);                        // t0 = (XP+ZP)*(XQ-ZQ)    
+    fp2sqr_mont(t1, P->Z);                          // ZP = (XP-ZP)^2    
+    fp2mul_mont(t1, Q->X, t1);                      // t1 = (XP-ZP)*(XQ+ZQ)    
+    fp2sub(P->X, P->Z, t2);                         // t2 = (XP+ZP)^2-(XP-ZP)^2    
+    fp2mul_mont(P->X, P->Z, P->X);                  // XP = (XP+ZP)^2*(XP-ZP)^2    
+    fp2mul_mont(t2, A24, Q->X);                     // XQ = A24*[(XP+ZP)^2-(XP-ZP)^2]    
+    fp2sub(t0, t1, Q->Z);                           // ZQ = (XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)    
+    fp2add(Q->X, P->Z, P->Z);                       // ZP = A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP-ZP)^2    
+    fp2add(t0, t1, Q->X);                           // XQ = (XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)    
+    fp2mul_mont(P->Z, t2, P->Z);                    // ZP = [A24*[(XP+ZP)^2-(XP-ZP)^2]+(XP-ZP)^2]*[(XP+ZP)^2-(XP-ZP)^2]    
+    fp2sqr_mont(Q->Z, Q->Z);                        // ZQ = [(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2    
+    fp2sqr_mont(Q->X, Q->X);                        // XQ = [(XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)]^2    
+    fp2mul_mont(Q->X, ZPQ, Q->X);                   // XQ = ZPQ*[(XP+ZP)*(XQ-ZQ)+(XP-ZP)*(XQ+ZQ)]^2    
+    fp2mul_mont(Q->Z, XPQ, Q->Z);                   // ZQ = XPQ*[(XP+ZP)*(XQ-ZQ)-(XP-ZP)*(XQ+ZQ)]^2          
+}
+
+
+void xDBL_e(const point_proj_t P, point_proj_t Q, const f2elm_t A24, const int e)
+{ // Doubling of a Montgomery point in projective coordinates (X:Z) over affine curve coefficient A. 
+  // Input: projective Montgomery x-coordinates P = (X1:Z1), where x1=X1/Z1 and Montgomery curve constants (A+2)/4.
+  // Output: projective Montgomery x-coordinates Q = 2*P = (X2:Z2). 
+    f2elm_t temp, a, b, c, aa, bb;    
+    
+    fp2copy(P->X,Q->X);
+    fp2copy(P->Z,Q->Z);
+    
+    for (int j = 0; j < e; j++) {
+        fp2add(Q->X, Q->Z, a);           // a = xQ + zQ
+        fp2sub(Q->X, Q->Z, b);           // b = xQ - zQ
+        fp2sqr_mont(a, aa);              //aa = (xQ + zQ)^2
+        fp2sqr_mont(b, bb);              //bb = (xQ - zQ)^2
+        fp2sub(aa, bb, c);               // c = (xQ + zQ)^2 - (xQ - zQ)^2
+        fp2mul_mont(aa, bb, Q->X);       // xQ = (xQ + zQ)^2 * (xQ - zQ)^2
+        fp2mul_mont(A24, c, temp);       // temp = A24 * ((xQ + zQ)^2 - (xQ - zQ)^2)
+        fp2add(temp, bb, temp);          // temp = A24 * ((xQ + zQ)^2 - (xQ - zQ)^2) + (xQ - zQ)^2
+        fp2mul_mont(c, temp, Q->Z);      // temp =  (A24 * ((xQ + zQ)^2 - (xQ - zQ)^2) + (xQ - zQ)^2) * ((xQ + zQ)^2 - (xQ - zQ)^2)
+    }
+}
+
+
+void Ladder(const point_proj_t P, const digit_t* m, const f2elm_t A, const unsigned int order_bits, point_proj_t R) 
+{
+    point_proj_t R0, R1;
+    f2elm_t A24 = {0};
+    unsigned int bit = 0;
+    digit_t mask;
+    int j, swap, prevbit = 0;    
+        
+    fpcopy((digit_t*)&Montgomery_one, A24[0]);
+    fpadd(A24[0], A24[0], A24[0]);
+    fp2add(A, A24, A24);
+    fp2div2(A24, A24);  
+    fp2div2(A24, A24);  // A24 = (A+2)/4          
+
+    j = order_bits - 1;
+    bit = (m[j >> LOG2RADIX] >> (j & (RADIX-1))) & 1;
+    while (bit == 0) {
+        j--;
+        bit = (m[j >> LOG2RADIX] >> (j & (RADIX-1))) & 1;
+    }
+
+    // R0 <- P, R1 <- 2P
+    fp2copy(P->X, R0->X);
+    fp2copy(P->Z, R0->Z);
+    xDBL_e(P, R1, A24, 1);    
+    
+    // Main loop
+    for (int i = j - 1;  i >= 0; i--) {
+        bit = (m[i >> LOG2RADIX] >> (i & (RADIX-1))) & 1;
+        swap = bit ^ prevbit;
+        prevbit = bit;
+        mask = 0 - (digit_t)swap;
+
+        swap_points(R0, R1, mask);
+        xDBLADD_proj(R0, R1, P->X, P->Z, A24);
+    }
+    swap = 0 ^ prevbit;
+    mask = 0 - (digit_t)swap;
+    swap_points(R0, R1, mask);    
+    
+    fp2copy(R0->X, R->X);
+    fp2copy(R0->Z, R->Z);
+}
+
+#endif
